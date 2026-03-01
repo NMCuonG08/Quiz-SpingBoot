@@ -1,0 +1,5 @@
+package com.example.Enum;
+
+public enum QuizType {
+    PRACTICE, EXAM, TIMED, LIVE, SINGLE_CHOICE, MULTIPLE_CHOICE, TRUE_FALSE, FILL_IN_THE_BLANK, ESSAY
+}

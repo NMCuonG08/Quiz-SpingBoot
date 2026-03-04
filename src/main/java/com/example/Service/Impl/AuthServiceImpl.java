@@ -10,6 +10,7 @@ import com.example.Service.AuthService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
+import org.springframework.beans.factory.annotation.Value;
 
 import com.example.Entity.Role;
 import com.example.Entity.UserRole;
@@ -25,19 +26,30 @@ public class AuthServiceImpl implements AuthService {
     private final UserRoleRepository userRoleRepository;
     private final PasswordEncoder passwordEncoder;
     private final JwtUtils jwtUtils;
+    private final com.example.Service.TokenBlacklistService tokenBlacklistService;
+
+    @Value("${google.client-id}")
+    private String googleClientId;
+
+    @Value("${google.client-secret}")
+    private String googleClientSecret;
 
     @Override
     public AuthResponseDTO registerUser(SignupRequestDTO signupRequest) {
-        if (userRepository.existsByUsername(signupRequest.getUsername())) {
-            throw new com.example.Exception.AppException("USERNAME_TAKEN", "Username is already taken!");
+        if (userRepository.existsByEmail(signupRequest.getEmail())) {
+            throw new com.example.Exception.AppException("EMAIL_IN_USE", "Email đã được sử dụng!");
         }
 
-        if (userRepository.existsByEmail(signupRequest.getEmail())) {
-            throw new com.example.Exception.AppException("EMAIL_IN_USE", "Email is already in use!");
+        // Auto-generate username từ phần trước @ của email
+        String baseUsername = signupRequest.getEmail().split("@")[0];
+        String username = baseUsername;
+        // Nếu username đã tồn tại, thêm số random vào cuối
+        if (userRepository.existsByUsername(username)) {
+            username = baseUsername + "_" + java.util.UUID.randomUUID().toString().substring(0, 5);
         }
 
         User user = new User();
-        user.setUsername(signupRequest.getUsername());
+        user.setUsername(username);
         user.setEmail(signupRequest.getEmail());
         user.setPassword(passwordEncoder.encode(signupRequest.getPassword()));
         user.setFull_name(signupRequest.getFull_name());
@@ -57,29 +69,59 @@ public class AuthServiceImpl implements AuthService {
         userRoleRepository.save(userRole);
 
         String jwt = jwtUtils.generateJwtTokenFromUsername(savedUser.getUsername());
+        String refreshToken = jwtUtils.generateRefreshToken(savedUser.getUsername());
 
-        return new AuthResponseDTO("User registered successfully!", savedUser.getId(), savedUser.getUsername(),
-                savedUser.getEmail(), jwt);
+        return new AuthResponseDTO("Đăng ký thành công!", savedUser.getId(), savedUser.getUsername(),
+                savedUser.getEmail(), jwt, refreshToken);
     }
 
     @Override
     public AuthResponseDTO authenticateUser(LoginRequestDTO loginRequest) {
-        User user = userRepository.findByUsername(loginRequest.getUsername())
+        User user = userRepository.findByEmail(loginRequest.getEmail())
                 .orElseThrow(() -> new com.example.Exception.AppException(
-                        "USER_NOT_FOUND", "User not found with username: " + loginRequest.getUsername()));
+                        "UNAUTHORIZED", "Email hoặc mật khẩu không chính xác",
+                        org.springframework.http.HttpStatus.UNAUTHORIZED));
 
         if (!passwordEncoder.matches(loginRequest.getPassword(), user.getPassword())) {
-            throw new com.example.Exception.AppException("UNAUTHORIZED", "Invalid password!",
+            throw new com.example.Exception.AppException("UNAUTHORIZED", "Email hoặc mật khẩu không chính xác",
                     org.springframework.http.HttpStatus.UNAUTHORIZED);
         }
 
         String jwt = jwtUtils.generateJwtTokenFromUsername(user.getUsername());
+        String refreshToken = jwtUtils.generateRefreshToken(user.getUsername());
 
-        return new AuthResponseDTO("Login successful!", user.getId(), user.getUsername(), user.getEmail(), jwt);
+        return new AuthResponseDTO("Login successful!", user.getId(), user.getUsername(), user.getEmail(), jwt,
+                refreshToken);
     }
 
     @Override
-    public com.example.DTO.Response.AuthLoginResult loginWithGoogle(String code) {
+    public void logout(String accessToken) {
+        tokenBlacklistService.blacklistToken(accessToken);
+    }
+
+    @Override
+    public java.util.Map<String, String> refreshAccessToken(String refreshToken) {
+        if (!jwtUtils.validateJwtToken(refreshToken)) {
+            throw new com.example.Exception.AppException("INVALID_REFRESH_TOKEN",
+                    "Refresh token không hợp lệ hoặc đã hết hạn",
+                    org.springframework.http.HttpStatus.UNAUTHORIZED);
+        }
+
+        if (tokenBlacklistService.isBlacklisted(refreshToken)) {
+            throw new com.example.Exception.AppException("INVALID_REFRESH_TOKEN", "Refresh token đã bị thu hồi",
+                    org.springframework.http.HttpStatus.UNAUTHORIZED);
+        }
+
+        String username = jwtUtils.getUserNameFromJwtToken(refreshToken);
+        String newAccessToken = jwtUtils.generateJwtTokenFromUsername(username);
+
+        java.util.Map<String, String> result = new java.util.HashMap<>();
+        result.put("accessToken", newAccessToken);
+        return result;
+    }
+
+    @Override
+    public com.example.DTO.Response.AuthLoginResult loginWithGoogle(String code, String redirectUri) {
         // Implement manual exchange just like NestJS
         org.springframework.web.client.RestTemplate restTemplate = new org.springframework.web.client.RestTemplate();
 
@@ -90,10 +132,23 @@ public class AuthServiceImpl implements AuthService {
         // (which is common),
         // we could just verify it. Let's assume the code exchange is standard:
 
-        // This is a placeholder for real credentials. In a real app, read from @Value
-        String clientId = "YOUR_GOOGLE_CLIENT_ID";
-        String clientSecret = "YOUR_GOOGLE_CLIENT_SECRET";
-        String redirectUri = "postmessage"; // Often 'postmessage' for SPA popup or your actual redirect URL
+        // Use injected credentials
+        String clientId = googleClientId;
+        String clientSecret = googleClientSecret;
+
+        // Use redirectUri from frontend if provided, otherwise fallback to postmessage
+        String finalRedirectUri = (redirectUri != null && !redirectUri.isEmpty()) ? redirectUri : "postmessage";
+
+        // DEBUG LOG - xem backend đang gửi gì tới Google
+        System.out.println("=== [GOOGLE LOGIN DEBUG] ===");
+        System.out.println(">>> Client ID    : " + clientId);
+        System.out.println(">>> Client Secret: "
+                + (clientSecret != null ? clientSecret.substring(0, Math.min(6, clientSecret.length())) + "..."
+                        : "NULL"));
+        System.out.println(">>> Redirect URI : " + finalRedirectUri);
+        System.out.println(">>> Code (prefix): "
+                + (code != null ? code.substring(0, Math.min(20, code.length())) + "..." : "NULL"));
+        System.out.println("============================");
 
         // 1. Exchange code -> token
         String tokenEndpoint = "https://oauth2.googleapis.com/token";
@@ -101,7 +156,7 @@ public class AuthServiceImpl implements AuthService {
         params.add("code", code);
         params.add("client_id", clientId);
         params.add("client_secret", clientSecret);
-        params.add("redirect_uri", redirectUri);
+        params.add("redirect_uri", finalRedirectUri);
         params.add("grant_type", "authorization_code");
 
         org.springframework.http.HttpHeaders headers = new org.springframework.http.HttpHeaders();
@@ -112,33 +167,40 @@ public class AuthServiceImpl implements AuthService {
         java.util.Map<String, Object> tokenResponse;
         try {
             tokenResponse = restTemplate.postForObject(tokenEndpoint, request, java.util.Map.class);
+        } catch (org.springframework.web.client.HttpClientErrorException e) {
+            String errorBody = e.getResponseBodyAsString();
+            throw new com.example.Exception.AppException("GOOGLE_TOKEN_EXCHANGE_FAILED",
+                    "Lỗi xác thực Google (Token Exchange): " + errorBody,
+                    org.springframework.http.HttpStatus.UNAUTHORIZED);
         } catch (Exception e) {
-            // Fallback for testing: if code exchange fails because we don't have real keys,
-            // maybe the code is actually an access_token sent directly by the frontend to
-            // mock this?
-            // This happens often when people migrate from NestJS to Spring and get confused
-            // by code vs token.
-            tokenResponse = new java.util.HashMap<>();
-            tokenResponse.put("access_token", code); // Try using code as token
+            throw new com.example.Exception.AppException("GOOGLE_AUTH_ERROR",
+                    "Không thể kết nối tới Google: " + e.getMessage());
+        }
+
+        if (tokenResponse == null || !tokenResponse.containsKey("access_token")) {
+            throw new com.example.Exception.AppException("GOOGLE_AUTH_FAILED", "Google không trả về access_token");
         }
 
         String googleAccessToken = (String) tokenResponse.get("access_token");
 
         // 2. Fetch UserInfo
         String userInfoEndpoint = "https://www.googleapis.com/oauth2/v3/userinfo";
-        org.springframework.http.HttpHeaders userInfoHeaders = new org.springframework.http.HttpHeaders();
-        userInfoHeaders.setBearerAuth(googleAccessToken);
-        org.springframework.http.HttpEntity<String> userInfoRequest = new org.springframework.http.HttpEntity<>(
-                userInfoHeaders);
+        java.util.Map<String, Object> userInfo;
+        try {
+            org.springframework.http.HttpHeaders userInfoHeaders = new org.springframework.http.HttpHeaders();
+            userInfoHeaders.setBearerAuth(googleAccessToken);
+            org.springframework.http.HttpEntity<String> userInfoRequest = new org.springframework.http.HttpEntity<>(
+                    userInfoHeaders);
 
-        java.util.Map<String, Object> userInfo = restTemplate.exchange(
-                userInfoEndpoint,
-                org.springframework.http.HttpMethod.GET,
-                userInfoRequest,
-                java.util.Map.class).getBody();
+            userInfo = restTemplate.exchange(userInfoEndpoint, org.springframework.http.HttpMethod.GET, userInfoRequest,
+                    java.util.Map.class).getBody();
+        } catch (Exception e) {
+            throw new com.example.Exception.AppException("GOOGLE_USER_INFO_FAILED",
+                    "Không thể lấy thông tin User từ Google: " + e.getMessage());
+        }
 
         if (userInfo == null || !userInfo.containsKey("email")) {
-            throw new com.example.Exception.AppException("GOOGLE_AUTH_FAILED", "Failed to retrieve Google user info");
+            throw new com.example.Exception.AppException("GOOGLE_AUTH_FAILED", "Dữ liệu Google trả về không có email");
         }
 
         String email = (String) userInfo.get("email");

@@ -26,17 +26,34 @@ public class CategoryController {
 
     // @PreAuthorize("hasRole('ADMIN') or hasRole('MANAGER')")
     @PostMapping(consumes = org.springframework.http.MediaType.MULTIPART_FORM_DATA_VALUE)
-    @Operation(summary = "Create a new Category", description = "Use form-data. Fill category properties individually and upload the icon file.")
-    public ResponseEntity<CategoryResponseDTO> createCategory(@ModelAttribute CategoryRequestDTO categoryRequestDTO) {
+    @Operation(summary = "Create a new Category (form-data)", description = "Use form-data when uploading icon file.")
+    public ResponseEntity<CategoryResponseDTO> createCategoryFormData(
+            @ModelAttribute CategoryRequestDTO categoryRequestDTO) {
+        return new ResponseEntity<>(categoryService.createCategory(categoryRequestDTO), HttpStatus.CREATED);
+    }
+
+    // @PreAuthorize("hasRole('ADMIN') or hasRole('MANAGER')")
+    @PostMapping(consumes = org.springframework.http.MediaType.APPLICATION_JSON_VALUE)
+    @Operation(summary = "Create a new Category (JSON)", description = "Use JSON body when no file upload needed.")
+    public ResponseEntity<CategoryResponseDTO> createCategoryJson(@RequestBody CategoryRequestDTO categoryRequestDTO) {
         return new ResponseEntity<>(categoryService.createCategory(categoryRequestDTO), HttpStatus.CREATED);
     }
 
     @PreAuthorize("hasRole('ADMIN') or hasRole('MANAGER')")
     @PutMapping(value = "/{id}", consumes = org.springframework.http.MediaType.MULTIPART_FORM_DATA_VALUE)
-    @Operation(summary = "Update an existing Category", description = "Use form-data. Fill category properties individually and upload the icon file.")
-    public ResponseEntity<CategoryResponseDTO> updateCategory(
+    @Operation(summary = "Update an existing Category (form-data)", description = "Use form-data when uploading icon file.")
+    public ResponseEntity<CategoryResponseDTO> updateCategoryFormData(
             @PathVariable("id") UUID id,
             @ModelAttribute CategoryRequestDTO categoryRequestDTO) {
+        return new ResponseEntity<>(categoryService.updateCategory(id, categoryRequestDTO), HttpStatus.OK);
+    }
+
+    @PreAuthorize("hasRole('ADMIN') or hasRole('MANAGER')")
+    @PutMapping(value = "/{id}", consumes = org.springframework.http.MediaType.APPLICATION_JSON_VALUE)
+    @Operation(summary = "Update an existing Category (JSON)", description = "Use JSON body when no file upload needed.")
+    public ResponseEntity<CategoryResponseDTO> updateCategoryJson(
+            @PathVariable("id") UUID id,
+            @RequestBody CategoryRequestDTO categoryRequestDTO) {
         return new ResponseEntity<>(categoryService.updateCategory(id, categoryRequestDTO), HttpStatus.OK);
     }
 
@@ -46,6 +63,13 @@ public class CategoryController {
     public ResponseEntity<Void> deleteCategory(@PathVariable("id") UUID id) {
         categoryService.deleteCategory(id);
         return new ResponseEntity<>(HttpStatus.NO_CONTENT);
+    }
+
+    // ⚠️ /slug/{slug} phải đặt TRƯỚC /{id}
+    @GetMapping("/slug/{slug}")
+    @Operation(summary = "Get Category by Slug")
+    public ResponseEntity<CategoryResponseDTO> getCategoryBySlug(@PathVariable("slug") String slug) {
+        return new ResponseEntity<>(categoryService.getCategoryBySlug(slug), HttpStatus.OK);
     }
 
     @GetMapping("/{id}")

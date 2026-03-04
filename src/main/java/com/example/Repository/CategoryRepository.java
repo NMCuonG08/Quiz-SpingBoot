@@ -7,4 +7,5 @@ import java.util.UUID;
 
 @Repository
 public interface CategoryRepository extends JpaRepository<Category, UUID> {
+    java.util.Optional<Category> findBySlug(String slug);
 }

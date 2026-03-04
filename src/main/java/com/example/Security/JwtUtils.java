@@ -21,11 +21,14 @@ public class JwtUtils {
     @Value("${app.jwtExpirationMs:86400000}")
     private int jwtExpirationMs;
 
+    // Refresh token hạn 30 ngày
+    @Value("${app.jwtRefreshExpirationMs:2592000000}")
+    private long jwtRefreshExpirationMs;
+
     public String generateJwtToken(Authentication authentication) {
         UserDetailsImpl userPrincipal = (UserDetailsImpl) authentication.getPrincipal();
-
         return Jwts.builder()
-                .subject((userPrincipal.getUsername()))
+                .subject(userPrincipal.getUsername())
                 .issuedAt(new Date())
                 .expiration(new Date((new Date()).getTime() + jwtExpirationMs))
                 .signWith(key())
@@ -41,6 +44,16 @@ public class JwtUtils {
                 .compact();
     }
 
+    public String generateRefreshToken(String username) {
+        return Jwts.builder()
+                .subject(username)
+                .claim("type", "refresh")
+                .issuedAt(new Date())
+                .expiration(new Date((new Date()).getTime() + jwtRefreshExpirationMs))
+                .signWith(key())
+                .compact();
+    }
+
     private javax.crypto.SecretKey key() {
         return Keys.hmacShaKeyFor(Decoders.BASE64.decode(jwtSecret));
     }
@@ -48,6 +61,11 @@ public class JwtUtils {
     public String getUserNameFromJwtToken(String token) {
         return Jwts.parser().verifyWith(key()).build()
                 .parseSignedClaims(token).getPayload().getSubject();
+    }
+
+    public Date getExpirationFromToken(String token) {
+        return Jwts.parser().verifyWith(key()).build()
+                .parseSignedClaims(token).getPayload().getExpiration();
     }
 
     public boolean validateJwtToken(String authToken) {
@@ -63,7 +81,6 @@ public class JwtUtils {
         } catch (IllegalArgumentException e) {
             logger.error("JWT claims string is empty: {}", e.getMessage());
         }
-
         return false;
     }
 }

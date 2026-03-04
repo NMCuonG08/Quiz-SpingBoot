@@ -16,6 +16,8 @@ public interface CategoryService {
 
     List<CategoryResponseDTO> getAllCategories();
 
+    CategoryResponseDTO getCategoryBySlug(String slug);
+
     com.example.DTO.Response.PaginatedData<CategoryResponseDTO> getAllCategoriesPaginated(int page, int limit,
             String sortBy, String sortDir);
 }

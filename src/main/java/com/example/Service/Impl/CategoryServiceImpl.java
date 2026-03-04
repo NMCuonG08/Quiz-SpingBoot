@@ -94,6 +94,14 @@ public class CategoryServiceImpl implements CategoryService {
         return categoryMapper.toResponseDTO(category);
     }
 
+    @Override
+    @Transactional(readOnly = true)
+    public CategoryResponseDTO getCategoryBySlug(String slug) {
+        Category category = categoryRepository.findBySlug(slug)
+                .orElseThrow(() -> new ResourceNotFoundException("Category", "slug", slug));
+        return categoryMapper.toResponseDTO(category);
+    }
+
     @SuppressWarnings("unchecked")
     @Override
     @Transactional(readOnly = true)

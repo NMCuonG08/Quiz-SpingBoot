@@ -7,4 +7,6 @@ import lombok.Data;
 public class GoogleLoginRequestDTO {
     @NotBlank(message = "code is required")
     private String code;
+
+    private String redirectUri;
 }

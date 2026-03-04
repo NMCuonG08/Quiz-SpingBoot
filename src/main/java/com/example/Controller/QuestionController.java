@@ -26,17 +26,31 @@ public class QuestionController {
     }
 
     @PostMapping(consumes = org.springframework.http.MediaType.MULTIPART_FORM_DATA_VALUE)
-    @Operation(summary = "Create a new Question", description = "Use form-data. Fill question properties individually and upload the media file.")
-    public ResponseEntity<QuestionResponseDTO> createQuestion(
+    @Operation(summary = "Create a new Question (form-data)", description = "Use form-data when uploading media file.")
+    public ResponseEntity<QuestionResponseDTO> createQuestionFormData(
             @ModelAttribute QuestionRequestDTO questionRequestDTO) {
         return new ResponseEntity<>(questionService.createQuestion(questionRequestDTO), HttpStatus.CREATED);
     }
 
+    @PostMapping(consumes = org.springframework.http.MediaType.APPLICATION_JSON_VALUE)
+    @Operation(summary = "Create a new Question (JSON)", description = "Use JSON body when no file upload needed.")
+    public ResponseEntity<QuestionResponseDTO> createQuestionJson(@RequestBody QuestionRequestDTO questionRequestDTO) {
+        return new ResponseEntity<>(questionService.createQuestion(questionRequestDTO), HttpStatus.CREATED);
+    }
+
     @PutMapping(value = "/{id}", consumes = org.springframework.http.MediaType.MULTIPART_FORM_DATA_VALUE)
-    @Operation(summary = "Update an existing Question", description = "Use form-data. Fill question properties individually and upload the media file.")
-    public ResponseEntity<QuestionResponseDTO> updateQuestion(
+    @Operation(summary = "Update an existing Question (form-data)", description = "Use form-data when uploading media file.")
+    public ResponseEntity<QuestionResponseDTO> updateQuestionFormData(
             @PathVariable("id") UUID id,
             @ModelAttribute QuestionRequestDTO questionRequestDTO) {
+        return new ResponseEntity<>(questionService.updateQuestion(id, questionRequestDTO), HttpStatus.OK);
+    }
+
+    @PutMapping(value = "/{id}", consumes = org.springframework.http.MediaType.APPLICATION_JSON_VALUE)
+    @Operation(summary = "Update an existing Question (JSON)", description = "Use JSON body when no file upload needed.")
+    public ResponseEntity<QuestionResponseDTO> updateQuestionJson(
+            @PathVariable("id") UUID id,
+            @RequestBody QuestionRequestDTO questionRequestDTO) {
         return new ResponseEntity<>(questionService.updateQuestion(id, questionRequestDTO), HttpStatus.OK);
     }
 

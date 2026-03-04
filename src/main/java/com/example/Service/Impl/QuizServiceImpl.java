@@ -44,7 +44,7 @@ public class QuizServiceImpl implements QuizService {
         if (file != null && !file.isEmpty()) {
             try {
                 Image image = imageService.uploadImage(file);
-                quizRequestDTO.setThumbnailId(image.getId());
+                quizRequestDTO.setThumbnail_id(image.getId());
             } catch (IOException e) {
                 throw new RuntimeException("Failed to upload image", e);
             }
@@ -60,7 +60,7 @@ public class QuizServiceImpl implements QuizService {
         if (file != null && !file.isEmpty()) {
             try {
                 Image image = imageService.uploadImage(file);
-                quizRequestDTO.setThumbnailId(image.getId());
+                quizRequestDTO.setThumbnail_id(image.getId());
             } catch (IOException e) {
                 throw new RuntimeException("Failed to upload image", e);
             }
@@ -90,6 +90,14 @@ public class QuizServiceImpl implements QuizService {
 
     @Override
     @Transactional(readOnly = true)
+    public QuizResponseDTO getQuizBySlug(String slug) {
+        Quiz existingQuiz = quizRepository.findBySlug(slug)
+                .orElseThrow(() -> new ResourceNotFoundException("Quiz", "slug", slug));
+        return quizMapper.toResponseDTO(existingQuiz);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
     public List<QuizResponseDTO> getAllQuizzes() {
         return quizMapper.toResponseDTOList(quizRepository.findAll());
     }
@@ -108,7 +116,7 @@ public class QuizServiceImpl implements QuizService {
 
         return com.example.DTO.Response.PaginatedData.<QuizResponseDTO>builder()
                 .items(items)
-                .pagination(paginationMeta)
+                .meta(paginationMeta)
                 .build();
     }
 

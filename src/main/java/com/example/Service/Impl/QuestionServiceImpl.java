@@ -26,13 +26,20 @@ public class QuestionServiceImpl implements QuestionService {
     private final QuestionRepository questionRepository;
     private final QuestionMapper questionMapper;
     private final ImageService imageService;
+    private final com.example.Repository.QuestionOptionRepository optionRepository;
+    private final com.example.Mapper.QuestionOptionMapper optionMapper;
 
     @Autowired
-    public QuestionServiceImpl(QuestionRepository questionRepository, QuestionMapper questionMapper,
-            ImageService imageService) {
+    public QuestionServiceImpl(QuestionRepository questionRepository,
+            QuestionMapper questionMapper,
+            ImageService imageService,
+            com.example.Repository.QuestionOptionRepository optionRepository,
+            com.example.Mapper.QuestionOptionMapper optionMapper) {
         this.questionRepository = questionRepository;
         this.questionMapper = questionMapper;
         this.imageService = imageService;
+        this.optionRepository = optionRepository;
+        this.optionMapper = optionMapper;
     }
 
     @Override
@@ -48,6 +55,18 @@ public class QuestionServiceImpl implements QuestionService {
         }
         Question question = questionMapper.toEntity(questionRequestDTO);
         Question savedQuestion = questionRepository.save(question);
+
+        // Save options if present
+        if (questionRequestDTO.getOptions() != null && !questionRequestDTO.getOptions().isEmpty()) {
+            java.util.List<com.example.Entity.QuestionOption> savedOptions = new java.util.ArrayList<>();
+            for (com.example.DTO.Request.QuestionOptionRequestDTO optionDTO : questionRequestDTO.getOptions()) {
+                com.example.Entity.QuestionOption option = optionMapper.toEntity(optionDTO);
+                option.setQuestion_id(savedQuestion.getId());
+                savedOptions.add(optionRepository.save(option));
+            }
+            savedQuestion.setOptions(savedOptions); // Update local object for response
+        }
+
         return questionMapper.toResponseDTO(savedQuestion);
     }
 
@@ -66,6 +85,22 @@ public class QuestionServiceImpl implements QuestionService {
                 .orElseThrow(() -> new ResourceNotFoundException("Question", "id", id));
         questionMapper.updateEntityFromRequestDTO(existingQuestion, questionRequestDTO);
         Question updatedQuestion = questionRepository.save(existingQuestion);
+
+        // Update options if present
+        if (questionRequestDTO.getOptions() != null) {
+            // Delete old options
+            List<com.example.Entity.QuestionOption> oldOptions = optionRepository.findByQuestionId(id);
+            optionRepository.deleteAll(oldOptions);
+
+            java.util.List<com.example.Entity.QuestionOption> savedOptions = new java.util.ArrayList<>();
+            for (com.example.DTO.Request.QuestionOptionRequestDTO optionDTO : questionRequestDTO.getOptions()) {
+                com.example.Entity.QuestionOption option = optionMapper.toEntity(optionDTO);
+                option.setQuestion_id(id);
+                savedOptions.add(optionRepository.save(option));
+            }
+            updatedQuestion.setOptions(savedOptions); // Update local object for response
+        }
+
         return questionMapper.toResponseDTO(updatedQuestion);
     }
 
@@ -87,7 +122,42 @@ public class QuestionServiceImpl implements QuestionService {
 
     @Override
     @Transactional(readOnly = true)
-    public List<QuestionResponseDTO> getQuestionsByQuizId(UUID quizId) {
-        return questionMapper.toResponseDTOList(questionRepository.findByQuizId(quizId));
+    public com.example.DTO.Response.PaginatedData<QuestionResponseDTO> getQuestionsByQuizId(UUID quizId, int page,
+            int limit) {
+        org.springframework.data.domain.Pageable pageable = org.springframework.data.domain.PageRequest.of(page - 1,
+                limit);
+        org.springframework.data.domain.Page<Question> questionPage = questionRepository.findByQuizId(quizId, pageable);
+        return mapToPaginatedData(questionPage);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public com.example.DTO.Response.PaginatedData<QuestionResponseDTO> getQuestionsByQuizSlug(String slug, int page,
+            int limit) {
+        org.springframework.data.domain.Pageable pageable = org.springframework.data.domain.PageRequest.of(page - 1,
+                limit);
+        org.springframework.data.domain.Page<Question> questionPage = questionRepository.findByQuizSlug(slug, pageable);
+        return mapToPaginatedData(questionPage);
+    }
+
+    private com.example.DTO.Response.PaginatedData<QuestionResponseDTO> mapToPaginatedData(
+            org.springframework.data.domain.Page<Question> page) {
+        List<QuestionResponseDTO> items = questionMapper.toResponseDTOList(page.getContent());
+        com.example.DTO.Response.PaginationMeta meta = com.example.DTO.Response.PaginationMeta.builder()
+                .page(page.getNumber() + 1)
+                .limit(page.getSize())
+                .total(page.getTotalElements())
+                .totalItems(page.getTotalElements())
+                .totalPages(page.getTotalPages())
+                .hasNext(page.hasNext())
+                .hasPrev(page.hasPrevious())
+                .build();
+        return new com.example.DTO.Response.PaginatedData<>(items, meta);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public List<QuestionResponseDTO> getQuestionsByQuizSlugPublic(String slug) {
+        return questionMapper.toResponseDTOList(questionRepository.findByQuizSlugPublic(slug));
     }
 }

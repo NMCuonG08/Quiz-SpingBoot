@@ -1,38 +1,40 @@
 package com.example.Config;
 
-import org.springframework.context.annotation.Configuration;
-import org.springframework.messaging.simp.config.MessageBrokerRegistry;
-import org.springframework.web.socket.config.annotation.EnableWebSocketMessageBroker;
-import org.springframework.web.socket.config.annotation.StompEndpointRegistry;
-import org.springframework.web.socket.config.annotation.WebSocketMessageBrokerConfigurer;
+import com.corundumstudio.socketio.Configuration;
+import com.corundumstudio.socketio.SocketIOServer;
+import com.corundumstudio.socketio.annotation.SpringAnnotationScanner;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.context.annotation.Bean;
 
-@Configuration
-@EnableWebSocketMessageBroker
-public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
+@org.springframework.context.annotation.Configuration
+public class WebSocketConfig {
 
-    /**
-     * Đăng ký endpoint WebSocket cho client kết nối vào.
-     * SockJS là fallback khi browser không hỗ trợ WS thuần.
-     * 
-     * Client kết nối tới: ws://localhost:8080/ws
-     */
-    @Override
-    public void registerStompEndpoints(StompEndpointRegistry registry) {
-        registry.addEndpoint("/ws")
-                .setAllowedOriginPatterns("*")
-                .withSockJS();
+    @Value("${socketio.host:localhost}")
+    private String host;
+
+    @Value("${socketio.port:3333}")
+    private Integer port;
+
+    @Bean(initMethod = "start", destroyMethod = "stop")
+    public SocketIOServer socketIOServer() {
+        Configuration config = new Configuration();
+        // Cần bind vào 0.0.0.0 hoặc localhost
+        config.setHostname(host);
+        config.setPort(port);
+        // Có thể config thêm context: /api/socket.io
+        config.setContext("/api/socket.io");
+
+        // Cấu hình CORS
+        com.corundumstudio.socketio.SocketConfig socketConfig = new com.corundumstudio.socketio.SocketConfig();
+        socketConfig.setReuseAddress(true);
+        config.setSocketConfig(socketConfig);
+        config.setOrigin("*");
+
+        return new SocketIOServer(config);
     }
 
-    /**
-     * Cấu hình message broker:
-     * - /topic : broadcast tới nhiều người (subscribe)
-     * - /queue : gửi riêng cho 1 người (point-to-point)
-     * - /app : prefix cho @MessageMapping trong Controller
-     */
-    @Override
-    public void configureMessageBroker(MessageBrokerRegistry registry) {
-        registry.enableSimpleBroker("/topic", "/queue");
-        registry.setApplicationDestinationPrefixes("/app");
-        registry.setUserDestinationPrefix("/user");
+    @Bean
+    public SpringAnnotationScanner springAnnotationScanner(SocketIOServer socketServer) {
+        return new SpringAnnotationScanner(socketServer);
     }
 }

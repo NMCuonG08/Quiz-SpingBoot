@@ -12,5 +12,10 @@ import lombok.NoArgsConstructor;
 @AllArgsConstructor
 public class PaginatedData<T> {
     private List<T> items;
-    private PaginationMeta pagination;
+    private PaginationMeta meta;
+
+    @com.fasterxml.jackson.annotation.JsonProperty("pagination")
+    public PaginationMeta getPagination() {
+        return meta;
+    }
 }

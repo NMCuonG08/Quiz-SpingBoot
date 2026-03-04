@@ -15,6 +15,8 @@ public interface QuizService {
 
     QuizResponseDTO getQuizById(UUID id);
 
+    QuizResponseDTO getQuizBySlug(String slug);
+
     List<QuizResponseDTO> getAllQuizzes();
 
     com.example.DTO.Response.PaginatedData<QuizResponseDTO> getMyQuizzes(UUID creatorId, int page, int limit);

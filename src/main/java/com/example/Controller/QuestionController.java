@@ -69,7 +69,19 @@ public class QuestionController {
 
     @GetMapping("/quiz/{quizId}")
     @Operation(summary = "Get Questions by Quiz ID")
-    public ResponseEntity<List<QuestionResponseDTO>> getQuestionsByQuizId(@PathVariable("quizId") UUID quizId) {
-        return new ResponseEntity<>(questionService.getQuestionsByQuizId(quizId), HttpStatus.OK);
+    public ResponseEntity<com.example.DTO.Response.ApiResponse<com.example.DTO.Response.PaginatedData<QuestionResponseDTO>>> getQuestionsByQuizId(
+            @PathVariable("quizId") UUID quizId,
+            @RequestParam(defaultValue = "1") int page,
+            @RequestParam(defaultValue = "18") int limit) {
+        return ResponseEntity.ok(com.example.DTO.Response.ApiResponse
+                .success(questionService.getQuestionsByQuizId(quizId, page, limit)));
+    }
+
+    @GetMapping("/quiz/slug/{slug}/public")
+    @Operation(summary = "Get Questions by Quiz slug (Public API)")
+    public ResponseEntity<com.example.DTO.Response.ApiResponse<List<QuestionResponseDTO>>> getQuestionsByQuizSlug(
+            @PathVariable("slug") String slug) {
+        return ResponseEntity.ok(com.example.DTO.Response.ApiResponse
+                .success(questionService.getQuestionsByQuizSlugPublic(slug)));
     }
 }

@@ -11,6 +11,12 @@ import java.util.stream.Collectors;
 @Component
 public class QuestionMapper {
 
+    private final QuestionOptionMapper optionMapper;
+
+    public QuestionMapper(QuestionOptionMapper optionMapper) {
+        this.optionMapper = optionMapper;
+    }
+
     public Question toEntity(QuestionRequestDTO dto) {
         if (dto == null)
             return null;
@@ -39,6 +45,10 @@ public class QuestionMapper {
                 .settings(question.getSettings())
                 .createdAt(question.getCreatedAt())
                 .updatedAt(question.getUpdatedAt())
+                .content(question.getQuestion_text())
+                .quizTitle(question.getQuiz() != null ? question.getQuiz().getTitle() : "")
+                .optionsCount(question.getOptions() != null ? question.getOptions().size() : 0)
+                .options(question.getOptions() != null ? optionMapper.toResponseDTOList(question.getOptions()) : null)
                 .build();
     }
 

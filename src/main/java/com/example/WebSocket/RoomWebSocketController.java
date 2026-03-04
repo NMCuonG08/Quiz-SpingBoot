@@ -1,195 +1,302 @@
 package com.example.WebSocket;
 
-import com.example.DTO.WebSocket.RoomEventPayload;
-import com.example.DTO.WebSocket.WsMessage;
-import com.example.Repository.QuizSessionRepository;
-import com.example.Entity.QuizSession;
+import com.corundumstudio.socketio.SocketIOServer;
+import com.corundumstudio.socketio.listener.ConnectListener;
+import com.corundumstudio.socketio.listener.DataListener;
+import com.corundumstudio.socketio.listener.DisconnectListener;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.messaging.handler.annotation.DestinationVariable;
-import org.springframework.messaging.handler.annotation.MessageMapping;
-import org.springframework.messaging.handler.annotation.Payload;
-import org.springframework.messaging.simp.SimpMessagingTemplate;
-import org.springframework.stereotype.Controller;
-import org.springframework.messaging.simp.SimpMessageHeaderAccessor;
+import org.springframework.stereotype.Component;
 
-import java.util.Optional;
+import jakarta.annotation.PostConstruct;
+import java.util.*;
 
-/**
- * WebSocket Controller xử lý các event real-time cho Quiz Room.
- * 
- * ===== LUỒNG HOẠT ĐỘNG =====
- * 
- * 1. Client connects tới: ws://localhost:8080/ws
- * 
- * 2. Client subscribe channel của phòng:
- * /topic/room/{sessionCode} <- nhận broadcast (tất cả thấy)
- * /user/queue/room/{sessionCode} <- nhận message riêng tư (chỉ mình thấy)
- * 
- * 3. Client gửi event lên server:
- * /app/room/{sessionCode}/join <- tham gia phòng
- * /app/room/{sessionCode}/leave <- rời phòng
- * /app/room/{sessionCode}/start <- host bắt đầu
- * /app/room/{sessionCode}/answer <- nộp đáp án
- * /app/room/{sessionCode}/next <- host chuyển câu kế tiếp
- * /app/room/{sessionCode}/end <- host kết thúc session
- */
-@Controller
+@Component
 public class RoomWebSocketController {
 
-    private final SimpMessagingTemplate messagingTemplate;
-    private final QuizSessionRepository quizSessionRepository;
+        private static final org.slf4j.Logger logger = org.slf4j.LoggerFactory.getLogger(RoomWebSocketController.class);
+        private final SocketIOServer server;
+        private final com.example.Security.JwtUtils jwtUtils;
+        private final com.example.Repository.UserRepository userRepository;
+        private final com.example.Repository.QuizRoomRepository quizRoomRepository;
 
-    @Autowired
-    public RoomWebSocketController(SimpMessagingTemplate messagingTemplate,
-            QuizSessionRepository quizSessionRepository) {
-        this.messagingTemplate = messagingTemplate;
-        this.quizSessionRepository = quizSessionRepository;
-    }
-
-    /**
-     * Event: User join vào phòng
-     * Client gửi tới: /app/room/{sessionCode}/join
-     * Broadcast tới: /topic/room/{sessionCode}
-     */
-    @MessageMapping("/room/{sessionCode}/join")
-    public void joinRoom(@DestinationVariable String sessionCode,
-            @Payload WsMessage<RoomEventPayload> message,
-            SimpMessageHeaderAccessor headerAccessor) {
-
-        String username = message.getFrom() != null ? message.getFrom() : "Unknown";
-
-        // Lưu sessionCode vào WebSocket session attribute để track khi disconnect
-        if (headerAccessor.getSessionAttributes() != null) {
-            headerAccessor.getSessionAttributes().put("sessionCode", sessionCode);
-            headerAccessor.getSessionAttributes().put("username", username);
+        @Autowired
+        public RoomWebSocketController(SocketIOServer server,
+                        com.example.Security.JwtUtils jwtUtils,
+                        com.example.Repository.UserRepository userRepository,
+                        com.example.Repository.QuizRoomRepository quizRoomRepository) {
+                this.server = server;
+                this.jwtUtils = jwtUtils;
+                this.userRepository = userRepository;
+                this.quizRoomRepository = quizRoomRepository;
         }
 
-        WsMessage<RoomEventPayload> broadcast = WsMessage.<RoomEventPayload>builder()
-                .event("USER_JOINED")
-                .sessionCode(sessionCode)
-                .from(username)
-                .payload(message.getPayload())
-                .build();
+        private static final String ROOM_PREFIX = "room:";
 
-        // Broadcast cho cả phòng
-        messagingTemplate.convertAndSend("/topic/room/" + sessionCode, broadcast);
+        @PostConstruct
+        public void init() {
+                server.addConnectListener(onConnected());
+                server.addDisconnectListener(onDisconnected());
 
-        System.out.println("[WS] " + username + " đã vào phòng: " + sessionCode);
-    }
+                server.addEventListener("join_room", Map.class, onJoinRoom());
+                server.addEventListener("leave_room", Map.class, onLeaveRoom());
+                server.addEventListener("send_message", Map.class, onSendMessage());
+                server.addEventListener("get_participants", Map.class, onGetParticipants());
+                server.addEventListener("get_messages", Map.class, onGetMessages());
+                server.addEventListener("get_room_status", Map.class, onGetRoomStatus());
+                server.addEventListener("invite_friends", Map.class, onInviteFriends());
+        }
 
-    /**
-     * Event: User rời phòng
-     * Client gửi tới: /app/room/{sessionCode}/leave
-     */
-    @MessageMapping("/room/{sessionCode}/leave")
-    public void leaveRoom(@DestinationVariable String sessionCode,
-            @Payload WsMessage<RoomEventPayload> message) {
+        private ConnectListener onConnected() {
+                return client -> {
+                        String authHeader = client.getHandshakeData().getHttpHeaders().get("Authorization");
+                        String token = null;
 
-        WsMessage<RoomEventPayload> broadcast = WsMessage.<RoomEventPayload>builder()
-                .event("USER_LEFT")
-                .sessionCode(sessionCode)
-                .from(message.getFrom())
-                .payload(message.getPayload())
-                .build();
+                        if (authHeader != null && authHeader.startsWith("Bearer ")) {
+                                token = authHeader.substring(7);
+                        } else {
+                                // Check Query param or auth field
+                                token = client.getHandshakeData().getSingleUrlParam("token");
+                        }
 
-        messagingTemplate.convertAndSend("/topic/room/" + sessionCode, broadcast);
+                        if (token == null || !jwtUtils.validateJwtToken(token)) {
+                                logger.warn("Client connection refused: Invalid or missing token, sessionId: {}",
+                                                client.getSessionId());
+                                // client.disconnect(); // Netty-socketio connection listener might not allow
+                                // direct disconnect here easily
+                                return;
+                        }
 
-        System.out.println("[WS] " + message.getFrom() + " đã rời phòng: " + sessionCode);
-    }
+                        String username = jwtUtils.getUserNameFromJwtToken(token);
+                        com.example.Entity.User user = userRepository.findByUsername(username).orElse(null);
 
-    /**
-     * Event: Host bắt đầu quiz
-     * Client gửi tới: /app/room/{sessionCode}/start
-     */
-    @MessageMapping("/room/{sessionCode}/start")
-    public void startSession(@DestinationVariable String sessionCode,
-            @Payload WsMessage<RoomEventPayload> message) {
+                        if (user == null) {
+                                logger.error("User not found for token: {}", username);
+                                return;
+                        }
 
-        WsMessage<RoomEventPayload> broadcast = WsMessage.<RoomEventPayload>builder()
-                .event("SESSION_STARTED")
-                .sessionCode(sessionCode)
-                .from(message.getFrom())
-                .payload(message.getPayload())
-                .build();
+                        client.set("userId", user.getId().toString());
+                        client.set("username", user.getUsername());
+                        client.set("avatarUr", user.getAvatar());
 
-        messagingTemplate.convertAndSend("/topic/room/" + sessionCode, broadcast);
+                        logger.info("🔌 Room WebSocket connected & authenticated: {} (User: {})", client.getSessionId(),
+                                        username);
+                };
+        }
 
-        System.out.println("[WS] Session started: " + sessionCode);
-    }
+        private DisconnectListener onDisconnected() {
+                return client -> {
+                        String userId = client.get("userId");
+                        logger.info("🔌 Room WebSocket disconnected: {} (User: {})", client.getSessionId(), userId);
 
-    /**
-     * Event: Participant nộp đáp án
-     * Client gửi tới: /app/room/{sessionCode}/answer
-     * Chỉ gửi lại cho đúng user đó xác nhận, và host nhận thống kê
-     */
-    @MessageMapping("/room/{sessionCode}/answer")
-    public void submitAnswer(@DestinationVariable String sessionCode,
-            @Payload WsMessage<RoomEventPayload> message) {
+                        // Cleanup logic similar to handleDisconnect in check.ts
+                        for (String room : client.getAllRooms()) {
+                                if (room.startsWith(ROOM_PREFIX)) {
+                                        String roomId = room.substring(ROOM_PREFIX.length());
 
-        String userId = message.getFrom();
+                                        // Notify others
+                                        Map<String, Object> userLeft = new HashMap<>();
+                                        userLeft.put("userId", userId);
+                                        userLeft.put("roomId", roomId);
+                                        userLeft.put("message", "User left the room");
+                                        server.getRoomOperations(room).sendEvent("user_left", userLeft);
 
-        // Gửi xác nhận riêng về cho người gửi
-        WsMessage<RoomEventPayload> ack = WsMessage.<RoomEventPayload>builder()
-                .event("ANSWER_RECEIVED")
-                .sessionCode(sessionCode)
-                .from("server")
-                .payload(message.getPayload())
-                .build();
+                                        // In many implementations, you'd also broadcast an updated participants_list
+                                        // here
+                                }
+                        }
+                };
+        }
 
-        messagingTemplate.convertAndSendToUser(userId, "/queue/room/" + sessionCode, ack);
+        @SuppressWarnings("rawtypes")
+        private DataListener<Map> onJoinRoom() {
+                return (client, data, ackSender) -> {
+                        String roomId = (String) data.get("roomId");
+                        if (roomId == null) {
+                                Map<String, String> err = new HashMap<>();
+                                err.put("error", "Room ID is required");
+                                client.sendEvent("room_join_error", err);
+                                return;
+                        }
 
-        // Broadcast cho host biết ai đã trả lời (không kèm đáp án)
-        RoomEventPayload hostPayload = RoomEventPayload.builder()
-                .userId(message.getPayload() != null ? message.getPayload().getUserId() : null)
-                .username(message.getFrom())
-                .sessionCode(sessionCode)
-                .build();
+                        String userId = client.get("userId");
+                        if (userId == null)
+                                return;
 
-        WsMessage<RoomEventPayload> hostBroadcast = WsMessage.<RoomEventPayload>builder()
-                .event("PARTICIPANT_ANSWERED")
-                .sessionCode(sessionCode)
-                .from(userId)
-                .payload(hostPayload)
-                .build();
+                        String socketRoom = ROOM_PREFIX + roomId;
+                        client.joinRoom(socketRoom);
+                        logger.info("🏠 Join room request: Client {} joined {}", userId, socketRoom);
 
-        messagingTemplate.convertAndSend("/topic/room/" + sessionCode, hostBroadcast);
-    }
+                        // Emit room_joined
+                        Map<String, Object> response = new HashMap<>();
+                        response.put("roomId", roomId);
+                        response.put("socketRoom", socketRoom);
+                        response.put("message", "Successfully joined room");
+                        client.sendEvent("room_joined", response);
 
-    /**
-     * Event: Host chuyển sang câu hỏi tiếp theo
-     * Client gửi tới: /app/room/{sessionCode}/next
-     */
-    @MessageMapping("/room/{sessionCode}/next")
-    public void nextQuestion(@DestinationVariable String sessionCode,
-            @Payload WsMessage<RoomEventPayload> message) {
+                        // Broadcast user_joined
+                        Map<String, Object> userJoined = new HashMap<>();
+                        userJoined.put("userId", userId);
+                        userJoined.put("roomId", roomId);
+                        userJoined.put("message", "User joined the room");
+                        server.getRoomOperations(socketRoom).sendEvent("user_joined", userJoined);
 
-        WsMessage<RoomEventPayload> broadcast = WsMessage.<RoomEventPayload>builder()
-                .event("NEXT_QUESTION")
-                .sessionCode(sessionCode)
-                .from(message.getFrom())
-                .payload(message.getPayload())
-                .build();
+                        // Ideally fetch participants and broadcast participants_list
+                        broadcastParticipants(socketRoom, roomId);
+                };
+        }
 
-        messagingTemplate.convertAndSend("/topic/room/" + sessionCode, broadcast);
-    }
+        @SuppressWarnings("rawtypes")
+        private DataListener<Map> onLeaveRoom() {
+                return (client, data, ackSender) -> {
+                        String roomId = (String) data.get("roomId");
+                        if (roomId == null)
+                                return;
 
-    /**
-     * Event: Host kết thúc session, broadcast kết quả
-     * Client gửi tới: /app/room/{sessionCode}/end
-     */
-    @MessageMapping("/room/{sessionCode}/end")
-    public void endSession(@DestinationVariable String sessionCode,
-            @Payload WsMessage<RoomEventPayload> message) {
+                        String userId = client.get("userId");
+                        String socketRoom = ROOM_PREFIX + roomId;
+                        client.leaveRoom(socketRoom);
 
-        WsMessage<RoomEventPayload> broadcast = WsMessage.<RoomEventPayload>builder()
-                .event("SESSION_ENDED")
-                .sessionCode(sessionCode)
-                .from(message.getFrom())
-                .payload(message.getPayload())
-                .build();
+                        Map<String, Object> response = new HashMap<>();
+                        response.put("roomId", roomId);
+                        response.put("message", "Successfully left room");
+                        client.sendEvent("room_left", response);
 
-        messagingTemplate.convertAndSend("/topic/room/" + sessionCode, broadcast);
+                        Map<String, Object> userLeft = new HashMap<>();
+                        userLeft.put("userId", userId);
+                        userLeft.put("roomId", roomId);
+                        userLeft.put("message", "User left the room");
+                        server.getRoomOperations(socketRoom).sendEvent("user_left", userLeft);
 
-        System.out.println("[WS] Session ended: " + sessionCode);
-    }
+                        broadcastParticipants(socketRoom, roomId);
+                };
+        }
+
+        @SuppressWarnings("rawtypes")
+        private DataListener<Map> onSendMessage() {
+                return (client, data, ackSender) -> {
+                        String roomId = (String) data.get("roomId");
+                        String msg = (String) data.get("message");
+                        if (roomId == null || msg == null)
+                                return;
+
+                        String userId = client.get("userId");
+                        String username = client.get("username");
+                        String avatar = client.get("avatarUr");
+                        String socketRoom = ROOM_PREFIX + roomId;
+
+                        Map<String, Object> messageData = new HashMap<>();
+                        messageData.put("id", "msg_" + System.currentTimeMillis() + "_"
+                                        + UUID.randomUUID().toString().substring(0, 8));
+                        messageData.put("room_id", roomId);
+                        messageData.put("user_id", userId);
+                        messageData.put("username", username);
+                        messageData.put("message", msg);
+                        messageData.put("message_type", "text");
+                        messageData.put("created_at", java.time.ZonedDateTime.now().toString());
+                        messageData.put("avatar_url", avatar);
+
+                        server.getRoomOperations(socketRoom).sendEvent("room_message", messageData);
+                };
+        }
+
+        @SuppressWarnings("rawtypes")
+        private DataListener<Map> onGetParticipants() {
+                return (client, data, ackSender) -> {
+                        String roomId = (String) data.get("roomId");
+                        if (roomId == null)
+                                return;
+                        broadcastParticipants(null, roomId, client);
+                };
+        }
+
+        @SuppressWarnings("rawtypes")
+        private DataListener<Map> onGetMessages() {
+                return (client, data, ackSender) -> {
+                        String roomId = (String) data.get("roomId");
+                        if (roomId == null)
+                                return;
+                        client.sendEvent("messages_list", new ArrayList<>());
+                };
+        }
+
+        @SuppressWarnings("rawtypes")
+        private DataListener<Map> onGetRoomStatus() {
+                return (client, data, ackSender) -> {
+                        String roomIdStr = (String) data.get("roomId");
+                        if (roomIdStr == null)
+                                return;
+
+                        try {
+                                UUID roomId = UUID.fromString(roomIdStr);
+                                com.example.Entity.QuizRoom room = quizRoomRepository.findById(roomId).orElse(null);
+                                if (room == null)
+                                        return;
+
+                                Map<String, Object> status = new HashMap<>();
+                                status.put("roomId", room.getId());
+                                status.put("roomCode", room.getRoom_code());
+                                status.put("status", room.getStatus());
+                                status.put("currentParticipants", room.getCurrent_participants());
+                                status.put("maxParticipants", room.getMax_participants());
+                                status.put("isPrivate", room.getIs_private());
+                                // ... map participants if needed
+                                client.sendEvent("room_status", status);
+                        } catch (Exception e) {
+                                logger.error("Error fetching room status", e);
+                        }
+                };
+        }
+
+        @SuppressWarnings({ "rawtypes", "unchecked" })
+        private DataListener<Map> onInviteFriends() {
+                return (client, data, ackSender) -> {
+                        String roomId = (String) data.get("roomId");
+                        List<String> friendIds = (List<String>) data.get("friendIds");
+                        if (roomId == null || friendIds == null)
+                                return;
+
+                        logger.info("📧 Inviting {} friends to room {}", friendIds.size(), roomId);
+                        for (String fId : friendIds) {
+                                // Find client for this user ID if online
+                                for (var c : server.getAllClients()) {
+                                        if (fId.equals(c.get("userId"))) {
+                                                Map<String, Object> invitation = new HashMap<>();
+                                                invitation.put("roomId", roomId);
+                                                invitation.put("message", "You've been invited to join a room");
+                                                c.sendEvent("room_invitation", invitation);
+                                        }
+                                }
+                        }
+                };
+        }
+
+        private void broadcastParticipants(String socketRoom, String roomId) {
+                broadcastParticipants(socketRoom, roomId, null);
+        }
+
+        private void broadcastParticipants(String socketRoom, String roomId,
+                        com.corundumstudio.socketio.SocketIOClient singleClient) {
+                if (socketRoom == null)
+                        socketRoom = ROOM_PREFIX + roomId;
+
+                List<Map<String, Object>> parts = new ArrayList<>();
+                for (var c : server.getRoomOperations(socketRoom).getClients()) {
+                        Map<String, Object> p = new HashMap<>();
+                        p.put("user_id", c.get("userId"));
+                        p.put("username", c.get("username"));
+                        p.put("avatar_url", c.get("avatarUr"));
+                        p.put("is_ready", true); // Default or fetch from DB
+                        parts.add(p);
+                }
+
+                Map<String, Object> response = new HashMap<>();
+                response.put("roomId", roomId);
+                response.put("participants", parts);
+
+                if (singleClient != null) {
+                        singleClient.sendEvent("participants_list", response);
+                } else {
+                        server.getRoomOperations(socketRoom).sendEvent("participants_list", response);
+                }
+        }
 }

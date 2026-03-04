@@ -15,5 +15,10 @@ public interface QuestionService {
 
     QuestionResponseDTO getQuestionById(UUID id);
 
-    List<QuestionResponseDTO> getQuestionsByQuizId(UUID quizId);
+    com.example.DTO.Response.PaginatedData<QuestionResponseDTO> getQuestionsByQuizId(UUID quizId, int page, int limit);
+
+    com.example.DTO.Response.PaginatedData<QuestionResponseDTO> getQuestionsByQuizSlug(String slug, int page,
+            int limit);
+
+    java.util.List<QuestionResponseDTO> getQuestionsByQuizSlugPublic(String slug);
 }

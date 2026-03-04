@@ -147,6 +147,12 @@ public class QuizController {
         return new ResponseEntity<>(quizService.getQuizById(id), HttpStatus.OK);
     }
 
+    @GetMapping("/slug/{slug}")
+    @Operation(summary = "Get Quiz by slug")
+    public ResponseEntity<QuizResponseDTO> getQuizBySlug(@PathVariable("slug") String slug) {
+        return new ResponseEntity<>(quizService.getQuizBySlug(slug), HttpStatus.OK);
+    }
+
     @GetMapping
     @Operation(summary = "Get All Quizzes")
     public ResponseEntity<List<QuizResponseDTO>> getAllQuizzes() {
@@ -164,7 +170,7 @@ public class QuizController {
         if (userDetails != null) {
             User user = userRepository.findByUsername(userDetails.getUsername())
                     .orElseThrow(() -> new com.example.Exception.AppException("USER_NOT_FOUND", "User not found"));
-            dto.setCreatorId(user.getId());
+            dto.setCreator_id(user.getId());
         }
     }
 }

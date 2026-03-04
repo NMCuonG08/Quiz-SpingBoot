@@ -13,6 +13,8 @@ import com.example.Enum.DifficultyLevel;
 
 @Repository
 public interface QuizRepository extends JpaRepository<Quiz, UUID> {
+    java.util.Optional<Quiz> findBySlug(String slug);
+
     Page<Quiz> findByCreatorId(UUID creatorId, Pageable pageable);
 
     @Query("SELECT q FROM Quiz q WHERE q.isDeleted = false AND q.is_public = true AND q.is_active = true")

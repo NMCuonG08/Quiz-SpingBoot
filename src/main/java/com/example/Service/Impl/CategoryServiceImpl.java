@@ -145,7 +145,7 @@ public class CategoryServiceImpl implements CategoryService {
 
         return com.example.DTO.Response.PaginatedData.<CategoryResponseDTO>builder()
                 .items(items)
-                .pagination(paginationMeta)
+                .meta(paginationMeta)
                 .build();
     }
 }

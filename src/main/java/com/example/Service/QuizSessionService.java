@@ -20,4 +20,12 @@ public interface QuizSessionService {
     List<QuizSessionResponseDTO> getQuizSessionsByHostId(UUID hostId);
 
     List<QuizSessionResponseDTO> getQuizSessionsByQuizId(UUID quizId);
+
+    com.example.DTO.Response.QuizSessionPublicResponseDTO createOrResumePublicSession(String slug, UUID userId);
+
+    java.util.List<com.example.DTO.Response.QuizAttemptResponseDTO> getUserAttempts(UUID userId);
+
+    com.example.DTO.Response.QuizAttemptResponseDTO completePublicQuizSession(UUID attemptId);
+
+    void submitPublicAnswer(UUID attemptId, com.example.DTO.Request.QuizAnswerPublicRequestDTO answerBody);
 }

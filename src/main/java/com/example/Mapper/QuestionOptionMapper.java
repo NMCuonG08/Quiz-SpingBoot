@@ -32,6 +32,11 @@ public class QuestionOptionMapper {
                 .mediaUrl(option.getMedia_url())
                 .createdAt(option.getCreatedAt())
                 .updatedAt(option.getUpdatedAt())
+                .content(option.getOption_text())
+                .questionText(option.getQuestion() != null ? option.getQuestion().getQuestion_text() : "")
+                .questionType(option.getQuestion() != null && option.getQuestion().getQuestion_type() != null
+                        ? option.getQuestion().getQuestion_type().toString()
+                        : "")
                 .build();
     }
 

@@ -200,7 +200,7 @@ public class FeedbackServiceImpl implements FeedbackService {
 
         return PaginatedData.<FeedbackResponseDTO>builder()
                 .items(items)
-                .pagination(meta)
+                .meta(meta)
                 .build();
     }
 
